@@ -1,4 +1,5 @@
 import heapq
+import math
 from typing import Optional
 from itertools import count
 
@@ -61,26 +62,40 @@ class MyPlayer(PlayerQuoridor):
         return best_action
 
 
-    def minimax(self, game_state: GameStateQuoridor, depth: int = 1, maximizing_player: bool = True) -> float:
+    def minimax(
+        self,
+        game_state: GameStateQuoridor,
+        depth: int = 1,
+        alpha: int = -math.inf,
+        beta: int = math.inf,
+        maximizing_player: bool = True
+    ) -> float:
         if depth == 0:
             return self.score_game_state(game_state)
 
         actions = tuple(game_state.generate_possible_stateless_actions())
 
         if maximizing_player:
-            value = float('-inf')
+            value = -math.inf
+            
             
             for action in actions:
                 new_game_state = game_state.apply_action(action)
-                value = max(value, self.minimax(new_game_state, depth - 1, False))
+                value = max(value, self.minimax(new_game_state, depth - 1, alpha, beta, False))
+                alpha = max(alpha, value)
+                if beta <= alpha:
+                    break
 
             return value
         else:
-            value = float('inf')
+            value = math.inf
 
             for action in actions:
                 new_game_state = game_state.apply_action(action)
-                value = min(value, self.minimax(new_game_state, depth - 1, True))
+                value = min(value, self.minimax(new_game_state, depth - 1, alpha, beta, True))
+                beta = min(beta, value)
+                if beta <= alpha:
+                    break
 
             return value
 
