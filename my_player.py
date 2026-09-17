@@ -1,3 +1,8 @@
+"""
+    Team:
+        Maxime Gazzé  - 2454017
+        Samuel Lajoie - 2447739
+"""
 import heapq
 import math
 from typing import Optional
@@ -5,7 +10,8 @@ from itertools import count
 
 from player_quoridor import PlayerQuoridor
 from seahorse.game.action import Action
-from game_state_quoridor import GameStateQuoridor
+from seahorse.game.stateless_action import StatelessAction
+from game_state_quoridor import GameStateQuoridor, Orientation, Wall
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
 from seahorse.player.player import Player
 
@@ -40,7 +46,7 @@ class MyPlayer(PlayerQuoridor):
             Action: The best action as determined by minimax.
         """
 
-        actions = tuple(current_state.generate_possible_stateless_actions())
+        actions = self.generate_possible_stateless_actions(current_state);
 
         if not actions:
             raise RuntimeError("No legal action available.")
@@ -73,11 +79,10 @@ class MyPlayer(PlayerQuoridor):
         if depth == 0:
             return self.score_game_state(game_state)
 
-        actions = tuple(game_state.generate_possible_stateless_actions())
+        actions = self.generate_possible_stateless_actions(game_state);
 
         if maximizing_player:
             value = -math.inf
-            
             
             for action in actions:
                 new_game_state = game_state.apply_action(action)
@@ -154,3 +159,31 @@ class MyPlayer(PlayerQuoridor):
                     heapq.heappush(open_set, (estimated_distance, temp_distance, next(counter), neighbour_pos))
 
         return None
+
+
+    def generate_possible_stateless_actions(self, game_state: GameStateQuoridor) -> [Action]:
+        """
+            Adding some improvements on the existing generate_possible_stateless_actions method of GameStateQuoridor:
+
+            - removing the external wall as they serves no purpose:
+        """
+        legal_moves = game_state._legal_moves()
+
+        actions = [*legal_moves]
+        dimensions = range(game_state.rep.dimension)
+        for row in dimensions:
+            for col in dimensions:
+
+                # Removing unusable top walls
+                h_wall = Wall(row, col, Orientation.HORIZONTAL)
+                if row != dimensions[0] and game_state._is_wall_legal(h_wall):
+                    actions.append(
+                        StatelessAction({"type": "horizontal", "destination": (h_wall.row, h_wall.col)}))
+
+                # Removing unusable left walls
+                v_wall = Wall(row, col, Orientation.VERTICAL)
+                if col != dimensions[0] and game_state._is_wall_legal(v_wall):
+                    actions.append(
+                        StatelessAction({"type": "vertical", "destination": (v_wall.row, v_wall.col)}))
+                    
+        return actions
