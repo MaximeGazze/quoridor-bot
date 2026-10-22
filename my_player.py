@@ -90,13 +90,11 @@ class MyPlayer(PlayerQuoridor):
         # when no remaining wall, simply follow shortest path
         remaining_walls = current_state.rep.remaining_walls[self.id]
         if remaining_walls == 0:
-            _, path = self.a_star_shortest_path(
-                current_state,
-                current_state.active_player,
-                return_path=True,
-            )
+            _, path = self.a_star_shortest_path(current_state, current_state.active_player)
+            me, opponent = (current_state.players[0], current_state.players[1]) if self.piece_type == 'W' else (current_state.players[1], current_state.players[0])
 
-            next_position = path[1]
+            # NOTE will not work when missing wall behind ennemy
+            next_position = path[0] if path[0] != current_state.rep.pawn_positions[opponent] else path[1]
 
             return StatelessAction({
                 "type": "move",
@@ -383,7 +381,7 @@ class MyPlayer(PlayerQuoridor):
                 if temp_distance < actual_distance.get(neighbour_pos, float("inf")):
                     actual_distance[neighbour_pos] = temp_distance
                     estimated_distance = temp_distance + abs(neighbour_pos[0] - goal_row)
-                    path = current_path + [neighbour_pos]
+                    path = current_path + [neighbour_pos] 
 
                     heapq.heappush(open_set, (estimated_distance, temp_distance, next(counter), neighbour_pos, path))
 
