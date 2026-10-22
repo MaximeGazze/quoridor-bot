@@ -86,8 +86,24 @@ class MyPlayer(PlayerQuoridor):
         if not actions:
             raise RuntimeError("No legal action available.")
 
+        # when no remaining wall, simply follow shortest path
+        remaining_walls = current_state.rep.remaining_walls[self.id]
+        if remaining_walls == 0:
+            path = self.a_star_shortest_path(
+                current_state,
+                current_state.active_player,
+                return_path=True,
+            )
+
+            next_position = path[1]
+
+            return StatelessAction({
+                "type": "move",
+                "destination": next_position,
+            })
+            
         depth = 3
-        if remaining_time < depth_remaining_time_threshold[1]:
+        if remaining_time < depth_remaining_time_threshold[1] or remaining_walls == 0:
             depth = 1
         elif remaining_time < depth_remaining_time_threshold[2]:
             depth = 2
@@ -252,7 +268,15 @@ class MyPlayer(PlayerQuoridor):
         return value
 
 
-    def a_star_shortest_path(self, game_state: GameStateQuoridor, player: PlayerQuoridor) -> Optional[int]:
+    def a_star_shortest_path(self,
+        game_state: GameStateQuoridor,
+        player: PlayerQuoridor,
+        return_path: bool = False
+    ) -> Optional[int | list[tuple[int, int]]]:
+        '''
+            By default, return a distance. If return_path is true the complete path is returned instead.
+        '''
+        
         start_pos = game_state.rep.pawn_positions[player.id]
         goal_row = player.get_goal_row()
 
@@ -267,6 +291,7 @@ class MyPlayer(PlayerQuoridor):
         open_set = [(abs(start_pos[0] - goal_row), 0, next(counter), start_pos)]
 
         actual_distance = {start_pos: 0}
+        came_from = {}
 
         while open_set:
             _, current_distance, _, position = heapq.heappop(open_set)
@@ -275,7 +300,17 @@ class MyPlayer(PlayerQuoridor):
                 continue
 
             if position[0] == goal_row:
-                return current_distance
+                if not return_path:
+                    return current_distance
+
+                path = [position]
+
+                while position in came_from:
+                    position = came_from[position]
+                    path.append(position)
+
+                path.reverse()
+                return path
 
             for neighbour_pos in game_state._reachable_neighbours(position):
             # for neighbour_pos in self.reachable_neighbours(game_state, position):
@@ -283,6 +318,7 @@ class MyPlayer(PlayerQuoridor):
 
                 if temp_distance < actual_distance.get(neighbour_pos, float("inf")):
                     actual_distance[neighbour_pos] = temp_distance
+                    came_from[neighbour_pos] = position
 
                     estimated_distance = temp_distance + abs(neighbour_pos[0] - goal_row)
                     heapq.heappush(open_set, (estimated_distance, temp_distance, next(counter), neighbour_pos))
