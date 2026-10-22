@@ -8,7 +8,7 @@ import math
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from itertools import count
 import random
 
@@ -22,16 +22,17 @@ from seahorse.player.player import Player
 
 opening_book: dict[int, StatelessAction] = {
     # moves for white
-    3385439458495528269:  StatelessAction({"type": "move", "destination": (7, 4)}),
+    3385439458495528269:  StatelessAction({"type": "move", "destination": (7, 4)}), # meet in the middle
     8457294491704433364:  StatelessAction({"type": "move", "destination": (6, 4)}),
     12314458424982501481: StatelessAction({"type": "move", "destination": (5, 4)}),
-    12509703932543820695: StatelessAction({"type": "horizontal", "destination": (6, 4)}),
+    12509703932543820695: StatelessAction({"type": "horizontal", "destination": (6, 4)}), # set wall behind when meeting in the middle
 
     # moves for black
-    13231600766163051132: StatelessAction({"type": "move", "destination": (1, 4)}), # first move W moved forward -> B will move forward
+    13231600766163051132: StatelessAction({"type": "move", "destination": (1, 4)}), # meet in the middle
     11548358507912285508: StatelessAction({"type": "move", "destination": (2, 4)}),
     7829530064862643382:  StatelessAction({"type": "move", "destination": (3, 4)}),
-    4481792325934018976:  StatelessAction({"type": "horizontal", "destination": (3, 3)}),
+    4481792325934018976:  StatelessAction({"type": "horizontal", "destination": (3, 3)}), # set wall behind when meeting in the middle
+    3164797794990064926:  StatelessAction({"type": "move", "destination": (5, 4)}), # take free jump if white meets in the middle
 }
 
 # under which remaining threshold the time should switch
@@ -75,11 +76,11 @@ class MyPlayer(PlayerQuoridor):
         """
 
         position_hash = self._zobrist_hasher.hash(current_state)
+        self.score_game_state(game_state=current_state, verbose=True)
         
         opening_book_action = opening_book.get(position_hash)
         if not opening_book_action is None:
             return opening_book_action
-
 
         actions = self.generate_possible_stateless_actions(current_state)
 
@@ -89,7 +90,7 @@ class MyPlayer(PlayerQuoridor):
         # when no remaining wall, simply follow shortest path
         remaining_walls = current_state.rep.remaining_walls[self.id]
         if remaining_walls == 0:
-            path = self.a_star_shortest_path(
+            _, path = self.a_star_shortest_path(
                 current_state,
                 current_state.active_player,
                 return_path=True,
@@ -178,7 +179,7 @@ class MyPlayer(PlayerQuoridor):
         beta: float = math.inf
     ) -> Tuple[float, Optional[Action]]:
         key = self._zobrist_hasher.hash(game_state)
-        ttEntry: Optional[ttEntry] = self._computated_states.get(key)
+        ttEntry: Optional[TTEntry] = self._computated_states.get(key)
 
         # If state is visited 
         if ttEntry is not None and ttEntry.depth >= depth:
@@ -247,36 +248,111 @@ class MyPlayer(PlayerQuoridor):
 
         return best_value, best_action
 
+
     def score_game_state(
         self,
         game_state: GameStateQuoridor,
+        verbose = False,
     ) -> float:
-        p1_shortest_path_len = self.a_star_shortest_path(game_state, game_state.players[0])
-        p2_shortest_path_len = self.a_star_shortest_path(game_state, game_state.players[1])
+        PATH_LENGTH_DIFFERENCE_WEIGHT = 2
+        WALL_COUNT_WEIGHT = 3
+        WALL_THREAT_WEIGHT = 2
 
-        if p1_shortest_path_len is None:
-            raise RuntimeError('No valid path for player 1')
+        player = game_state.players[0] if self.piece_type == 'W' else game_state.players[1]
+        opponent = game_state.players[1] if self.piece_type == 'W' else game_state.players[0]
 
-        if p2_shortest_path_len is None:
-            raise RuntimeError('No valid path for player 2')
+        if game_state.rep.pawn_positions[player][0] == player.get_goal_row():
+            return math.inf
+        elif game_state.rep.pawn_positions[opponent][0] == opponent.get_goal_row():
+            return -math.inf
 
-        value = p1_shortest_path_len - p2_shortest_path_len
+        value = 0
 
-        if self.piece_type == 'W':
-            value *= -1
+        player_shortest_path_len, player_shortest_path = self.a_star_shortest_path(game_state, player)
+        opponent_shortest_path_len, opponent_shortest_path = self.a_star_shortest_path(game_state, opponent)
+
+        path_len_diff = opponent_shortest_path_len - player_shortest_path_len
+
+        value += PATH_LENGTH_DIFFERENCE_WEIGHT * path_len_diff
+
+        player_remaining_walls = game_state.rep.remaining_walls[player.id]
+        opponent_remaining_walls = game_state.rep.remaining_walls[opponent.id]
+
+        if player_remaining_walls >= 1:
+            # check single wall threats possible from player
+            opponent_worst_wall_path_len = self.check_worst_wall_threat(game_state, opponent_shortest_path_len, opponent_shortest_path, opponent)
+            opponent_worst_wall_path_len_diff = opponent_worst_wall_path_len - opponent_shortest_path_len
+
+            value += WALL_THREAT_WEIGHT * opponent_worst_wall_path_len_diff
+
+        if opponent_remaining_walls >= 1:
+            # check single wall threats possible from opponent
+            player_worst_wall_path_len = self.check_worst_wall_threat(game_state, player_shortest_path_len, player_shortest_path, player)
+            player_worst_wall_path_len_diff = player_worst_wall_path_len - player_shortest_path_len
+
+            value -= WALL_THREAT_WEIGHT * player_worst_wall_path_len_diff
+
+        value += WALL_COUNT_WEIGHT * player_remaining_walls
+        value -= WALL_COUNT_WEIGHT * opponent_remaining_walls
+
+        if verbose:
+            print('player_shortest_path_len', player_shortest_path_len)
+            print('opponent_shortest_path_len', opponent_shortest_path_len)
+            print('path_len_diff', path_len_diff)
+            try:
+                print('player_worst_wall_path_len', player_worst_wall_path_len)
+                print('player_worst_wall_path_len_diff', player_worst_wall_path_len_diff)
+            except NameError:
+                pass
+            try:
+                print('opponent_worst_wall_path_len', opponent_worst_wall_path_len)
+                print('opponent_worst_wall_path_len_diff', opponent_worst_wall_path_len_diff)
+            except NameError:
+                pass
+            print('player_remaining_walls', player_remaining_walls)
+            print('opponent_remaining_walls', opponent_remaining_walls)
+            print('value', value)
 
         return value
 
 
-    def a_star_shortest_path(self,
-        game_state: GameStateQuoridor,
-        player: PlayerQuoridor,
-        return_path: bool = False
-    ) -> Optional[int | list[tuple[int, int]]]:
-        '''
-            By default, return a distance. If return_path is true the complete path is returned instead.
-        '''
-        
+    def check_worst_wall_threat(self, game_state: GameStateQuoridor, path_length: int, path: List[Tuple[int, int]], player: PlayerQuoridor) -> int:
+        max_path_length = path_length
+
+        for wall_action in self.generate_walls_on_path(game_state, path):
+            new_game_state = game_state.apply_action(wall_action)
+            path_length, _ = self.a_star_shortest_path(new_game_state, player)
+            max_path_length = max(max_path_length, path_length)
+
+        return max_path_length
+
+
+    def generate_walls_on_path(self, game_state: GameStateQuoridor, path: List[Tuple[int, int]]) -> List[StatelessAction]:
+        walls = []
+
+        for (path_y, path_x) in path:
+            # Horizontal walls
+            for row in range(path_y, path_y + 1):
+                for col in range(path_x - 1, path_x):
+                    if row > 0 and row <= 8 and col >= 0 and col < 8:
+                        h_wall = Wall(row, col, Orientation.HORIZONTAL)
+
+                        if game_state._is_wall_legal(h_wall):
+                                walls.append(StatelessAction({"type": "horizontal", "destination": (h_wall.row, h_wall.col)}))
+
+            # Vertical walls
+            for row in range(path_y - 1, path_y):
+                for col in range(path_x, path_x + 1):
+                    if row >= 0 and row < 8 and col > 0 and col <= 8:
+                        v_wall = Wall(row, col, Orientation.VERTICAL)
+
+                        if game_state._is_wall_legal(v_wall):
+                                walls.append(StatelessAction({"type": "vertical", "destination": (v_wall.row, v_wall.col)}))
+
+        return walls
+
+
+    def a_star_shortest_path(self, game_state: GameStateQuoridor, player: PlayerQuoridor) -> Tuple[int, List[Tuple[int, int]]]:
         start_pos = game_state.rep.pawn_positions[player.id]
         goal_row = player.get_goal_row()
 
@@ -287,43 +363,31 @@ class MyPlayer(PlayerQuoridor):
         # Counter is used in case the first two elements are equal. We do not want to compare the position to pick an element.
         counter = count()
 
-        # heap entries : (estimated_distance, actual_distance, counter, position)
-        open_set = [(abs(start_pos[0] - goal_row), 0, next(counter), start_pos)]
+        # Heap entries : (estimated_distance, actual_distance, counter, position, path)
+        open_set = [(abs(start_pos[0] - goal_row), 0, next(counter), start_pos, [])]
 
         actual_distance = {start_pos: 0}
-        came_from = {}
 
         while open_set:
-            _, current_distance, _, position = heapq.heappop(open_set)
+            _, current_distance, _, position, current_path = heapq.heappop(open_set)
 
             if current_distance != actual_distance[position]:
                 continue
 
             if position[0] == goal_row:
-                if not return_path:
-                    return current_distance
-
-                path = [position]
-
-                while position in came_from:
-                    position = came_from[position]
-                    path.append(position)
-
-                path.reverse()
-                return path
+                return current_distance, current_path
 
             for neighbour_pos in game_state._reachable_neighbours(position):
-            # for neighbour_pos in self.reachable_neighbours(game_state, position):
                 temp_distance = current_distance + 1
 
                 if temp_distance < actual_distance.get(neighbour_pos, float("inf")):
                     actual_distance[neighbour_pos] = temp_distance
-                    came_from[neighbour_pos] = position
-
                     estimated_distance = temp_distance + abs(neighbour_pos[0] - goal_row)
-                    heapq.heappush(open_set, (estimated_distance, temp_distance, next(counter), neighbour_pos))
+                    path = current_path + [neighbour_pos]
 
-        return None
+                    heapq.heappush(open_set, (estimated_distance, temp_distance, next(counter), neighbour_pos, path))
+
+        raise RuntimeError(f'No valid path for player {player.id}')
 
 
     def generate_possible_stateless_actions(self, game_state: GameStateQuoridor) -> list[StatelessAction]:
@@ -354,12 +418,11 @@ class MyPlayer(PlayerQuoridor):
         return actions
 
 
-
-
 class Bound(Enum):
     EXACT = auto()
     LOWER = auto()
     UPPER = auto()
+
 
 @dataclass
 class TTEntry:
@@ -367,6 +430,7 @@ class TTEntry:
     value: float
     action: Optional[Action]
     bound: Bound
+
 
 class ZobristQuoridorHasher:
     def __init__(self, height: int = 9, width: int = 9) -> None:
