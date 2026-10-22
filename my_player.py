@@ -90,19 +90,25 @@ class MyPlayer(PlayerQuoridor):
         # when no remaining wall, simply follow shortest path
         remaining_walls = current_state.rep.remaining_walls[self.id]
         if remaining_walls == 0:
-            _, path = self.a_star_shortest_path(
-                current_state,
-                current_state.active_player,
-                return_path=True,
-            )
+            _, path = self.a_star_shortest_path(current_state, current_state.active_player)
 
-            next_position = path[1]
+            possible_actions = self.generate_possible_stateless_actions(game_state)
+            for action in possible_actions:
+                if action in path:
+                    return action
 
-            return StatelessAction({
-                "type": "move",
-                "destination": next_position,
-            })
-            
+            best_distance = math.inf
+            best_action = None
+            for action in possible_actions:
+                new_game_state = current_state.apply_action(action)
+                distance, _path = self.a_star_shortest_path(current_state, current_state.active_player)
+
+                if distance < best_distance:
+                    best_distance = distance
+                    best_action = action 
+
+            return best_action            
+
         depth = 3
         if remaining_time < depth_remaining_time_threshold[1] or remaining_walls == 0:
             depth = 1
