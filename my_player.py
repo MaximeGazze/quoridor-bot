@@ -87,8 +87,24 @@ class MyPlayer(PlayerQuoridor):
         if not actions:
             raise RuntimeError("No legal action available.")
 
+        # when no remaining wall, simply follow shortest path
+        remaining_walls = current_state.rep.remaining_walls[self.id]
+        if remaining_walls == 0:
+            _, path = self.a_star_shortest_path(
+                current_state,
+                current_state.active_player,
+                return_path=True,
+            )
+
+            next_position = path[1]
+
+            return StatelessAction({
+                "type": "move",
+                "destination": next_position,
+            })
+            
         depth = 3
-        if remaining_time < depth_remaining_time_threshold[1]:
+        if remaining_time < depth_remaining_time_threshold[1] or remaining_walls == 0:
             depth = 1
         elif remaining_time < depth_remaining_time_threshold[2]:
             depth = 2
