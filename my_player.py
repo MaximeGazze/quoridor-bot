@@ -8,7 +8,6 @@ import math
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Optional, Tuple
 from itertools import count
 import random
 
@@ -20,7 +19,9 @@ from game_state_quoridor import GameStateQuoridor, Orientation, Wall
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
 from seahorse.player.player import Player
 
-opening_book: dict[int, StatelessAction] = {
+type ZobristHash = int
+
+opening_book: dict[ZobristHash, StatelessAction] = {
     # moves for white
     3385439458495528269:  StatelessAction({"type": "move", "destination": (7, 4)}), # meet in the middle
     8457294491704433364:  StatelessAction({"type": "move", "destination": (6, 4)}),
@@ -61,7 +62,7 @@ class MyPlayer(PlayerQuoridor):
         """
         super().__init__(piece_type, goal_row, name)
         self._zobrist_hasher = ZobristQuoridorHasher()
-        self._computated_states: dict[int, TTEntry] = {}
+        self._computated_states: dict[ZobristHash, TTEntry] = {}
 
     
     def compute_action(self, current_state: GameStateQuoridor, remaining_time: float = 15*60, **kwargs) -> Action:
@@ -82,17 +83,12 @@ class MyPlayer(PlayerQuoridor):
         if not opening_book_action is None:
             return opening_book_action
 
-        actions = self.generate_possible_stateless_actions(current_state)
-
-        if not actions:
-            raise RuntimeError("No legal action available.")
-
         # when no remaining wall, simply follow shortest path
         remaining_walls = current_state.rep.remaining_walls[self.id]
         if remaining_walls == 0:
             _, path = self.a_star_shortest_path(current_state, current_state.active_player)
 
-            possible_actions = self.generate_possible_stateless_actions(game_state)
+            possible_actions = self.generate_possible_stateless_actions(current_state)
             for action in possible_actions:
                 if action in path:
                     return action
@@ -107,10 +103,10 @@ class MyPlayer(PlayerQuoridor):
                     best_distance = distance
                     best_action = action 
 
-            return best_action            
+            return best_action
 
         depth = 3
-        if remaining_time < depth_remaining_time_threshold[1] or remaining_walls == 0:
+        if remaining_time < depth_remaining_time_threshold[1]:
             depth = 1
         elif remaining_time < depth_remaining_time_threshold[2]:
             depth = 2
@@ -126,11 +122,11 @@ class MyPlayer(PlayerQuoridor):
         color: int = 1,
         alpha: float = -math.inf,
         beta: float = math.inf,
-    ) -> Optional[Action]:
+    ) -> Action:
         actions = self.generate_possible_stateless_actions(game_state)
 
         if not actions:
-            return None
+            raise RuntimeError("No legal action available.")
 
         best_action = actions[0]
 
@@ -183,9 +179,9 @@ class MyPlayer(PlayerQuoridor):
         color: int = 1,
         alpha: float = -math.inf,
         beta: float = math.inf
-    ) -> Tuple[float, Optional[Action]]:
+    ) -> tuple[float, Action | None]:
         key = self._zobrist_hasher.hash(game_state)
-        ttEntry: Optional[TTEntry] = self._computated_states.get(key)
+        ttEntry: TTEntry | None = self._computated_states.get(key)
 
         # If state is visited 
         if ttEntry is not None and ttEntry.depth >= depth:
@@ -322,7 +318,7 @@ class MyPlayer(PlayerQuoridor):
         return value
 
 
-    def check_worst_wall_threat(self, game_state: GameStateQuoridor, path_length: int, path: List[Tuple[int, int]], player: PlayerQuoridor) -> int:
+    def check_worst_wall_threat(self, game_state: GameStateQuoridor, path_length: int, path: list[tuple[int, int]], player: PlayerQuoridor) -> int:
         max_path_length = path_length
 
         for wall_action in self.generate_walls_on_path(game_state, path):
@@ -333,7 +329,7 @@ class MyPlayer(PlayerQuoridor):
         return max_path_length
 
 
-    def generate_walls_on_path(self, game_state: GameStateQuoridor, path: List[Tuple[int, int]]) -> List[StatelessAction]:
+    def generate_walls_on_path(self, game_state: GameStateQuoridor, path: list[tuple[int, int]]) -> list[StatelessAction]:
         walls = []
 
         for (path_y, path_x) in path:
@@ -358,7 +354,7 @@ class MyPlayer(PlayerQuoridor):
         return walls
 
 
-    def a_star_shortest_path(self, game_state: GameStateQuoridor, player: PlayerQuoridor) -> Tuple[int, List[Tuple[int, int]]]:
+    def a_star_shortest_path(self, game_state: GameStateQuoridor, player: PlayerQuoridor) -> tuple[int, list[tuple[int, int]]]:
         start_pos = game_state.rep.pawn_positions[player.id]
         goal_row = player.get_goal_row()
 
@@ -434,7 +430,7 @@ class Bound(Enum):
 class TTEntry:
     depth: int
     value: float
-    action: Optional[Action]
+    action: Action | None
     bound: Bound
 
 
@@ -456,7 +452,7 @@ class ZobristQuoridorHasher:
         return random.getrandbits(64)
 
 
-    def hash(self, game_state: GameStateQuoridor) -> int:
+    def hash(self, game_state: GameStateQuoridor) -> ZobristHash:
         h = 0
 
         player1_pawn_pos = game_state.rep.pawn_positions[game_state.players[0].id]
