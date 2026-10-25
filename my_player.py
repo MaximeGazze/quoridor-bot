@@ -23,24 +23,23 @@ type ZobristHash = int
 
 opening_book: dict[ZobristHash, StatelessAction] = {
     # moves for white
-    3385439458495528269:  StatelessAction({"type": "move", "destination": (7, 4)}), # meet in the middle
-    8457294491704433364:  StatelessAction({"type": "move", "destination": (6, 4)}),
-    12314458424982501481: StatelessAction({"type": "move", "destination": (5, 4)}),
-    12509703932543820695: StatelessAction({"type": "horizontal", "destination": (6, 4)}), # set wall behind when meeting in the middle
-
+    3385439458495528269:	 StatelessAction({'type': 'move', 'destination': (7, 4)}),
+    8457294491704433364:	 StatelessAction({'type': 'move', 'destination': (6, 4)}),
+    12314458424982501481:	 StatelessAction({'type': 'move', 'destination': (5, 4)}),
+    12509703932543820695:	 StatelessAction({'type': 'horizontal', 'destination': (6, 4)}),
     # moves for black
-    13231600766163051132: StatelessAction({"type": "move", "destination": (1, 4)}), # meet in the middle
-    11548358507912285508: StatelessAction({"type": "move", "destination": (2, 4)}),
-    7829530064862643382:  StatelessAction({"type": "move", "destination": (3, 4)}),
-    4481792325934018976:  StatelessAction({"type": "horizontal", "destination": (3, 3)}), # set wall behind when meeting in the middle
-    3164797794990064926:  StatelessAction({"type": "move", "destination": (5, 4)}), # take free jump if white meets in the middle
+    13231600766163051132:	 StatelessAction({'type': 'move', 'destination': (1, 4)}),
+    11548358507912285508:	 StatelessAction({'type': 'move', 'destination': (2, 4)}),
+    7829530064862643382:	 StatelessAction({'type': 'move', 'destination': (3, 4)}),
+    6207915300414758776:	 StatelessAction({'type': 'vertical', 'destination': (4, 6)}),
+    4481792325934018976:	 StatelessAction({'type': 'horizontal', 'destination': (3, 3)}),
+    10488103466272291811:	 StatelessAction({'type': 'horizontal', 'destination': (3, 3)}),
 }
 
 # under which remaining threshold the time should switch
 depth_remaining_time_threshold = {
     1: 10,     # 10s
-    2: 5 * 60, # 5min
-    # 3: 
+    2: 2 * 60, # 5min
 }
 
 class MyPlayer(PlayerQuoridor):
@@ -63,6 +62,7 @@ class MyPlayer(PlayerQuoridor):
         super().__init__(piece_type, goal_row, name)
         self._zobrist_hasher = ZobristQuoridorHasher()
         self._computated_states: dict[ZobristHash, TTEntry] = {}
+        self._opponent_met = False
 
     
     def compute_action(self, current_state: GameStateQuoridor, remaining_time: float = 15*60, **kwargs) -> Action:
@@ -85,19 +85,24 @@ class MyPlayer(PlayerQuoridor):
 
         # when no remaining wall, simply follow shortest path
         remaining_walls = current_state.rep.remaining_walls[self.id]
-        if remaining_walls == 0:
+        my_player, opponent = (current_state.players[0], current_state.players[1]) if self.piece_type == 'W' else (current_state.players[1], current_state.players[0])
+        opponent_remaining_walls = current_state.rep.remaining_walls[opponent.get_id()]
+        my_player_pos, opponent_pos = (current_state.rep.pawn_positions[my_player], current_state.rep.pawn_positions[opponent])
+
+        if abs(my_player_pos[0] - opponent_pos[0]) < 2:
+            self._opponent_met = True
+
+        if not self._opponent_met or remaining_walls == 0:
             _, path = self.a_star_shortest_path(current_state, current_state.active_player)
 
-            possible_actions = self.generate_possible_stateless_actions(current_state)
-            for action in possible_actions:
-                if action in path:
-                    return action
-
+            possible_actions= current_state._legal_moves()
             best_distance = math.inf
             best_action = None
+
             for action in possible_actions:
                 new_game_state = current_state.apply_action(action)
-                distance, _path = self.a_star_shortest_path(current_state, current_state.active_player)
+                distance, _path = self.a_star_shortest_path(new_game_state, new_game_state.compute_next_player())
+
 
                 if distance < best_distance:
                     best_distance = distance
@@ -152,7 +157,10 @@ class MyPlayer(PlayerQuoridor):
                 end = time.time()
                 elapsed_time = end - start
                 remaining_time -= elapsed_time
+
                 if remaining_time < depth_remaining_time_threshold[1] and depth != 1:
+                   return best_action 
+                elif remaining_time < depth_remaining_time_threshold[2] and depth == 3:
                    return best_action 
                 
                 local_alpha = max(local_alpha, iteration_best_value)
